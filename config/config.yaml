@@ -1,0 +1,47 @@
+# YouTube Transcript Chatbot Configuration
+
+app:
+  title: "AI-Powered YouTube Transcript Tutor"
+  description: "Ask questions from YouTube lecture transcripts using AI"
+  version: "1.0.0"
+  
+ui:
+  theme: "light"  # light, dark, auto
+  sidebar_width: 300
+  max_chat_history_display: 50
+  enable_animations: true
+  
+processing:
+  default_chunk_size: 1000
+  chunk_overlap: 200
+  max_transcript_length: 1000000  # 1MB
+  supported_languages: ["en", "es", "fr", "de", "it", "pt", "ru", "ja", "ko", "zh"]
+  default_language: "en"
+  
+ai:
+  model_temperature: 0.7
+  max_tokens: 2000
+  retrieval_k: 4  # Number of documents to retrieve
+  chain_type: "stuff"  # stuff, map_reduce, refine, map_rerank
+  
+export:
+  formats: ["pdf", "txt", "json"]
+  max_export_entries: 1000
+  pdf_page_size: "A4"
+  
+cache:
+  enable_vectorstore_cache: true
+  cache_directory: "cache"
+  max_cache_size_mb: 500
+  
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  file: "logs/app.log"
+  max_file_size_mb: 10
+  backup_count: 5
+  
+security:
+  max_url_length: 2048
+  allowed_domains: ["youtube.com", "youtu.be", "m.youtube.com"]
+  rate_limit_requests: 100
+  rate_limit_window_minutes: 60

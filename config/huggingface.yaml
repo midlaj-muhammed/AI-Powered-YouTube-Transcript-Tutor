@@ -1,0 +1,16 @@
+# Hugging Face Spaces specific configuration
+
+app:
+  title: "AI-Powered YouTube Transcript Tutor"
+  description: "Ask questions from YouTube lecture transcripts using AI"
+  
+logging:
+  level: "INFO"
+  file: null  # Disable file logging
+  
+cache:
+  enable_vectorstore_cache: false
+  cache_directory: null
+  
+security:
+  youtube_api_fallback: true  # Enable fallback methods for YouTube API
