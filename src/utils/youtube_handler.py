@@ -5,6 +5,8 @@ YouTube video handling utilities for transcript extraction and metadata retrieva
 import os
 import re
 import logging
+import time
+import random
 from typing import Optional, Dict, Any, List
 from pytube import YouTube
 from youtube_transcript_api import (
@@ -22,7 +24,30 @@ class YouTubeHandler:
     
     def __init__(self):
         self.supported_languages = ['en', 'es', 'fr', 'de', 'it', 'pt', 'ru', 'ja', 'ko', 'zh']
-    
+        # Rate limiting to prevent IP blocking
+        self.last_request_time = 0
+        self.min_request_interval = 3.0  # Minimum 3 seconds between requests
+        self.max_retries = 3
+        self.base_delay = 2.0
+
+    def _rate_limit(self):
+        """Implement rate limiting to prevent IP blocking."""
+        current_time = time.time()
+        time_since_last_request = current_time - self.last_request_time
+
+        if time_since_last_request < self.min_request_interval:
+            sleep_time = self.min_request_interval - time_since_last_request
+            logger.info(f"Rate limiting: sleeping for {sleep_time:.2f} seconds")
+            time.sleep(sleep_time)
+
+        self.last_request_time = time.time()
+
+    def _exponential_backoff(self, attempt: int):
+        """Implement exponential backoff for retries."""
+        delay = self.base_delay * (2 ** attempt) + random.uniform(0, 1)
+        logger.info(f"Exponential backoff: attempt {attempt + 1}, sleeping for {delay:.2f} seconds")
+        time.sleep(delay)
+
     def validate_youtube_url(self, url: str) -> bool:
         """
         Validate if the provided URL is a valid YouTube URL.
@@ -113,12 +138,12 @@ class YouTubeHandler:
     
     def get_youtube_transcript(self, url: str, language: str = 'en') -> Dict[str, Any]:
         """
-        Extract transcript from YouTube video with comprehensive error handling.
-        
+        Extract transcript from YouTube video with comprehensive error handling and rate limiting.
+
         Args:
             url (str): YouTube video URL
             language (str): Preferred language code (default: 'en')
-            
+
         Returns:
             Dict[str, Any]: Dictionary containing transcript text and metadata
         """
@@ -129,81 +154,113 @@ class YouTubeHandler:
             'metadata': {},
             'available_languages': []
         }
-        
+
         try:
             if not self.validate_youtube_url(url):
                 result['error'] = "Invalid YouTube URL format"
                 return result
-            
+
             video_id = self.extract_video_id(url)
             if not video_id:
                 result['error'] = "Could not extract video ID from URL"
                 return result
-            
+
+            # Apply rate limiting before making requests
+            self._rate_limit()
+
             # Get video metadata
             result['metadata'] = self.get_video_metadata(url)
-            
+
+            # Apply rate limiting before transcript requests
+            self._rate_limit()
+
             # Get available transcripts
             result['available_languages'] = self.get_available_transcripts(video_id)
             
-            # Try to get transcript with multiple strategies
+            # Try to get transcript with multiple strategies and retries
             transcript_data = None
             used_language = None
 
-            # Strategy 1: Try the standard approach
-            try:
-                transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            # Strategy 1: Try the standard approach with retries
+            for attempt in range(self.max_retries):
+                try:
+                    if attempt > 0:
+                        self._exponential_backoff(attempt - 1)
 
-                # Try preferred language first, then fallback to English, then any available
-                languages_to_try = [language] if language != 'en' else []
-                languages_to_try.extend(['en'])
-                languages_to_try.extend([lang['language_code'] for lang in result['available_languages']
-                                       if lang['language_code'] not in languages_to_try])
+                    self._rate_limit()
+                    transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
 
-                for lang in languages_to_try:
-                    try:
-                        transcript = transcript_list.find_transcript([lang])
-                        transcript_data = transcript.fetch()
-                        used_language = lang
-                        logger.info(f"Successfully got transcript in {lang}")
+                    # Try preferred language first, then fallback to English, then any available
+                    languages_to_try = [language] if language != 'en' else []
+                    languages_to_try.extend(['en'])
+                    languages_to_try.extend([lang['language_code'] for lang in result['available_languages']
+                                           if lang['language_code'] not in languages_to_try])
+
+                    for lang in languages_to_try:
+                        try:
+                            transcript = transcript_list.find_transcript([lang])
+                            transcript_data = transcript.fetch()
+                            used_language = lang
+                            logger.info(f"Successfully got transcript in {lang} on attempt {attempt + 1}")
+                            break
+                        except (NoTranscriptFound, TranscriptsDisabled):
+                            continue
+
+                    if transcript_data:
                         break
-                    except (NoTranscriptFound, TranscriptsDisabled):
-                        continue
 
-            except Exception as e:
-                logger.warning(f"Standard transcript method failed: {e}")
+                except Exception as e:
+                    logger.warning(f"Standard transcript method failed on attempt {attempt + 1}: {e}")
+                    if attempt == self.max_retries - 1:
+                        logger.error(f"All {self.max_retries} attempts failed for standard method")
 
             # Strategy 2: Try alternative approach if first failed
             if not transcript_data:
-                try:
-                    # Try to get any available transcript without language preference
-                    transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-                    available_transcripts = list(transcript_list)
+                for attempt in range(self.max_retries):
+                    try:
+                        if attempt > 0:
+                            self._exponential_backoff(attempt - 1)
 
-                    if available_transcripts:
-                        # Try manual transcripts first
-                        manual_transcripts = [t for t in available_transcripts if not t.is_generated]
-                        if manual_transcripts:
-                            transcript = manual_transcripts[0]
-                        else:
-                            transcript = available_transcripts[0]
+                        self._rate_limit()
+                        # Try to get any available transcript without language preference
+                        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+                        available_transcripts = list(transcript_list)
 
-                        transcript_data = transcript.fetch()
-                        used_language = transcript.language_code
-                        logger.info(f"Got transcript using alternative method in {used_language}")
+                        if available_transcripts:
+                            # Try manual transcripts first
+                            manual_transcripts = [t for t in available_transcripts if not t.is_generated]
+                            if manual_transcripts:
+                                transcript = manual_transcripts[0]
+                            else:
+                                transcript = available_transcripts[0]
 
-                except Exception as e:
-                    logger.warning(f"Alternative transcript method also failed: {e}")
+                            transcript_data = transcript.fetch()
+                            used_language = transcript.language_code
+                            logger.info(f"Got transcript using alternative method in {used_language} on attempt {attempt + 1}")
+                            break
 
-            # Strategy 3: Try with different proxy/headers (if needed)
+                    except Exception as e:
+                        logger.warning(f"Alternative transcript method failed on attempt {attempt + 1}: {e}")
+                        if attempt == self.max_retries - 1:
+                            logger.error(f"All {self.max_retries} attempts failed for alternative method")
+
+            # Strategy 3: Try basic method as last resort
             if not transcript_data:
-                try:
-                    # This is a last resort - try with minimal parameters
-                    transcript_data = YouTubeTranscriptApi.get_transcript(video_id)
-                    used_language = 'auto-detected'
-                    logger.info("Got transcript using basic method")
-                except Exception as e:
-                    logger.warning(f"Basic transcript method failed: {e}")
+                for attempt in range(self.max_retries):
+                    try:
+                        if attempt > 0:
+                            self._exponential_backoff(attempt - 1)
+
+                        self._rate_limit()
+                        # This is a last resort - try with minimal parameters
+                        transcript_data = YouTubeTranscriptApi.get_transcript(video_id)
+                        used_language = 'auto-detected'
+                        logger.info(f"Got transcript using basic method on attempt {attempt + 1}")
+                        break
+                    except Exception as e:
+                        logger.warning(f"Basic transcript method failed on attempt {attempt + 1}: {e}")
+                        if attempt == self.max_retries - 1:
+                            logger.error(f"All {self.max_retries} attempts failed for basic method")
             
             if transcript_data:
                 # Format transcript text - handle both dict and object formats
@@ -244,19 +301,35 @@ class YouTubeHandler:
             result['error'] = "This video is unavailable"
         except CouldNotRetrieveTranscript as e:
             error_msg = str(e).lower()
-            if "region" in error_msg or "country" in error_msg:
+            if "ip" in error_msg and "block" in error_msg:
+                result['error'] = "IP blocked by YouTube: Too many requests from your IP address"
+                result['suggestion'] = "Wait 10-15 minutes before trying again, or try a different network"
+                result['details'] = "YouTube has temporarily blocked your IP due to too many requests. This is common when testing or using cloud services."
+            elif "region" in error_msg or "country" in error_msg:
                 result['error'] = "Regional restriction: This video's transcripts are not available in your region"
                 result['suggestion'] = "Try using a VPN or try a different video"
             elif "private" in error_msg:
                 result['error'] = "This video is private and transcripts cannot be accessed"
             elif "disabled" in error_msg:
                 result['error'] = "Transcripts are disabled for this video"
+            elif "cloud provider" in error_msg:
+                result['error'] = "Cloud provider IP blocked: YouTube blocks most cloud service IPs"
+                result['suggestion'] = "Try from a different network or wait before retrying"
+                result['details'] = "YouTube automatically blocks IPs from cloud providers like AWS, Google Cloud, etc."
             else:
                 result['error'] = f"Could not retrieve transcript: {str(e)}"
             logger.warning(f"Could not retrieve transcript for video: {e}")
         except Exception as e:
             error_msg = str(e).lower()
-            if "region" in error_msg or "country" in error_msg:
+            if "ip" in error_msg and ("block" in error_msg or "ban" in error_msg):
+                result['error'] = "IP blocked by YouTube: Too many requests from your IP address"
+                result['suggestion'] = "Wait 10-15 minutes before trying again, or try a different network"
+                result['details'] = "YouTube has temporarily blocked your IP due to too many requests. This is common when testing or using cloud services."
+            elif "cloud provider" in error_msg or "aws" in error_msg or "google cloud" in error_msg or "azure" in error_msg:
+                result['error'] = "Cloud provider IP blocked: YouTube blocks most cloud service IPs"
+                result['suggestion'] = "Try from a different network or wait before retrying"
+                result['details'] = "YouTube automatically blocks IPs from cloud providers like AWS, Google Cloud, etc."
+            elif "region" in error_msg or "country" in error_msg:
                 result['error'] = "Regional restriction: This video's transcripts are not available in your region"
                 result['suggestion'] = "Try using a VPN or try a different video"
             elif "private" in error_msg:
@@ -265,6 +338,10 @@ class YouTubeHandler:
                 result['error'] = "This video is unavailable or has been removed"
             elif "disabled" in error_msg:
                 result['error'] = "Transcripts are disabled for this video"
+            elif "too many requests" in error_msg:
+                result['error'] = "Rate limited: Too many requests to YouTube"
+                result['suggestion'] = "Wait a few minutes before trying again"
+                result['details'] = "You've made too many requests to YouTube. Please wait before trying again."
             else:
                 result['error'] = f"Unexpected error: {str(e)}"
             logger.error(f"Unexpected error getting transcript: {e}")

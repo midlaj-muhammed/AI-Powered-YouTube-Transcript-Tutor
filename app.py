@@ -258,7 +258,33 @@ class YouTubeChatbotApp:
                 st.error(f"❌ {error_msg}")
 
                 # Provide specific suggestions based on error type
-                if "region" in error_msg.lower():
+                if "ip blocked" in error_msg.lower() or "cloud provider" in error_msg.lower():
+                    st.warning("🚫 **YouTube has temporarily blocked your IP address**")
+                    st.info("💡 **How to fix this:**")
+                    st.markdown("""
+                    **Immediate solutions:**
+                    - ⏰ **Wait 10-15 minutes** before trying again
+                    - 🌐 **Try a different network** (mobile hotspot, different WiFi)
+                    - 🔄 **Restart your router** to get a new IP address
+
+                    **Why this happens:**
+                    - Too many requests to YouTube in a short time
+                    - Using cloud services (AWS, Google Cloud, etc.)
+                    - YouTube's anti-bot protection
+
+                    **Prevention:**
+                    - Wait between video processing attempts
+                    - Don't process multiple videos rapidly
+                    """)
+
+                    # Show a countdown timer suggestion
+                    st.info("⏱️ **Recommended:** Wait 15 minutes, then try one of the example videos below.")
+
+                elif "rate limited" in error_msg.lower() or "too many requests" in error_msg.lower():
+                    st.warning("⚡ **Rate Limited: Too many requests**")
+                    st.info("💡 **Solution:** Wait 5-10 minutes before trying again.")
+
+                elif "region" in error_msg.lower():
                     st.info("💡 **Suggestions to fix this issue:**")
                     st.markdown("""
                     - Try a different video that's available in your region
