@@ -146,26 +146,64 @@ class YouTubeHandler:
             # Get available transcripts
             result['available_languages'] = self.get_available_transcripts(video_id)
             
-            # Try to get transcript
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-            
-            # Try preferred language first, then fallback to English, then any available
-            languages_to_try = [language] if language != 'en' else []
-            languages_to_try.extend(['en'])
-            languages_to_try.extend([lang['language_code'] for lang in result['available_languages'] 
-                                   if lang['language_code'] not in languages_to_try])
-            
+            # Try to get transcript with multiple strategies
             transcript_data = None
             used_language = None
-            
-            for lang in languages_to_try:
+
+            # Strategy 1: Try the standard approach
+            try:
+                transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+
+                # Try preferred language first, then fallback to English, then any available
+                languages_to_try = [language] if language != 'en' else []
+                languages_to_try.extend(['en'])
+                languages_to_try.extend([lang['language_code'] for lang in result['available_languages']
+                                       if lang['language_code'] not in languages_to_try])
+
+                for lang in languages_to_try:
+                    try:
+                        transcript = transcript_list.find_transcript([lang])
+                        transcript_data = transcript.fetch()
+                        used_language = lang
+                        logger.info(f"Successfully got transcript in {lang}")
+                        break
+                    except (NoTranscriptFound, TranscriptsDisabled):
+                        continue
+
+            except Exception as e:
+                logger.warning(f"Standard transcript method failed: {e}")
+
+            # Strategy 2: Try alternative approach if first failed
+            if not transcript_data:
                 try:
-                    transcript = transcript_list.find_transcript([lang])
-                    transcript_data = transcript.fetch()
-                    used_language = lang
-                    break
-                except (NoTranscriptFound, TranscriptsDisabled):
-                    continue
+                    # Try to get any available transcript without language preference
+                    transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+                    available_transcripts = list(transcript_list)
+
+                    if available_transcripts:
+                        # Try manual transcripts first
+                        manual_transcripts = [t for t in available_transcripts if not t.is_generated]
+                        if manual_transcripts:
+                            transcript = manual_transcripts[0]
+                        else:
+                            transcript = available_transcripts[0]
+
+                        transcript_data = transcript.fetch()
+                        used_language = transcript.language_code
+                        logger.info(f"Got transcript using alternative method in {used_language}")
+
+                except Exception as e:
+                    logger.warning(f"Alternative transcript method also failed: {e}")
+
+            # Strategy 3: Try with different proxy/headers (if needed)
+            if not transcript_data:
+                try:
+                    # This is a last resort - try with minimal parameters
+                    transcript_data = YouTubeTranscriptApi.get_transcript(video_id)
+                    used_language = 'auto-detected'
+                    logger.info("Got transcript using basic method")
+                except Exception as e:
+                    logger.warning(f"Basic transcript method failed: {e}")
             
             if transcript_data:
                 # Format transcript text - handle both dict and object formats
@@ -204,10 +242,31 @@ class YouTubeHandler:
             result['error'] = "No transcript found for this video"
         except VideoUnavailable:
             result['error'] = "This video is unavailable"
-        except CouldNotRetrieveTranscript:
-            result['error'] = "Could not retrieve transcript. It may not be available in your region"
+        except CouldNotRetrieveTranscript as e:
+            error_msg = str(e).lower()
+            if "region" in error_msg or "country" in error_msg:
+                result['error'] = "Regional restriction: This video's transcripts are not available in your region"
+                result['suggestion'] = "Try using a VPN or try a different video"
+            elif "private" in error_msg:
+                result['error'] = "This video is private and transcripts cannot be accessed"
+            elif "disabled" in error_msg:
+                result['error'] = "Transcripts are disabled for this video"
+            else:
+                result['error'] = f"Could not retrieve transcript: {str(e)}"
+            logger.warning(f"Could not retrieve transcript for video: {e}")
         except Exception as e:
-            result['error'] = f"Unexpected error: {str(e)}"
+            error_msg = str(e).lower()
+            if "region" in error_msg or "country" in error_msg:
+                result['error'] = "Regional restriction: This video's transcripts are not available in your region"
+                result['suggestion'] = "Try using a VPN or try a different video"
+            elif "private" in error_msg:
+                result['error'] = "This video is private and transcripts cannot be accessed"
+            elif "unavailable" in error_msg:
+                result['error'] = "This video is unavailable or has been removed"
+            elif "disabled" in error_msg:
+                result['error'] = "Transcripts are disabled for this video"
+            else:
+                result['error'] = f"Unexpected error: {str(e)}"
             logger.error(f"Unexpected error getting transcript: {e}")
         
         return result

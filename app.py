@@ -171,6 +171,41 @@ class YouTubeChatbotApp:
                 self.session_manager.clear_chat_history()
                 st.success("Chat history cleared!")
                 st.rerun()
+
+            # Working video examples
+            st.markdown("### 🎯 Example Videos")
+            st.markdown("Try these videos that usually work:")
+
+            example_videos = {
+                "🧮 Neural Networks": "https://www.youtube.com/watch?v=aircAruvnKk",
+                "📚 Khan Academy": "https://www.youtube.com/watch?v=WUvTyaaNkzM",
+                "🎓 TED-Ed": "https://www.youtube.com/watch?v=kBdfcR-8hEY"
+            }
+
+            for title, url in example_videos.items():
+                if st.button(title, key=f"example_{title}"):
+                    st.session_state.video_url = url
+                    st.rerun()
+
+            # Troubleshooting section
+            st.markdown("### 🔧 Troubleshooting")
+            with st.expander("Common Issues & Solutions"):
+                st.markdown("""
+                **"Could not retrieve transcript":**
+                - Video may be region-restricted
+                - Try videos from educational channels
+                - Ensure video has captions enabled
+
+                **"No transcript available":**
+                - Video doesn't have captions
+                - Try auto-generated captions videos
+                - Look for educational content
+
+                **"Video unavailable":**
+                - Video may be private/deleted
+                - Check the URL is correct
+                - Try a different video
+                """)
     
     def render_video_input_section(self):
         """Render video input and processing section."""
@@ -219,7 +254,46 @@ class YouTubeChatbotApp:
             transcript_result = self.youtube_handler.get_youtube_transcript(video_url, language)
             
             if not transcript_result['success']:
-                st.error(f"❌ {transcript_result['error']}")
+                error_msg = transcript_result['error']
+                st.error(f"❌ {error_msg}")
+
+                # Provide specific suggestions based on error type
+                if "region" in error_msg.lower():
+                    st.info("💡 **Suggestions to fix this issue:**")
+                    st.markdown("""
+                    - Try a different video that's available in your region
+                    - Look for videos from creators in your country
+                    - Try educational channels like Khan Academy, Coursera, or TED-Ed
+                    - Some videos may work better than others depending on regional settings
+                    """)
+                elif "private" in error_msg.lower():
+                    st.info("💡 **This video is private.** Try a public video instead.")
+                elif "disabled" in error_msg.lower():
+                    st.info("💡 **Captions are disabled for this video.** Try finding a video with captions enabled.")
+                elif "unavailable" in error_msg.lower():
+                    st.info("💡 **This video is unavailable.** It may have been deleted or made private.")
+                else:
+                    st.info("💡 **Try these alternatives:**")
+                    st.markdown("""
+                    - Make sure the video is public and has captions
+                    - Try a different YouTube video
+                    - Look for educational content which usually has transcripts
+                    - Check if the video URL is correct
+                    """)
+
+                # Show some example working videos
+                st.markdown("### 🎯 **Try these example videos that usually work:**")
+                example_videos = [
+                    "https://www.youtube.com/watch?v=aircAruvnKk",  # 3Blue1Brown
+                    "https://www.youtube.com/watch?v=WUvTyaaNkzM",  # Khan Academy
+                    "https://www.youtube.com/watch?v=kBdfcR-8hEY",  # TED-Ed
+                ]
+
+                for i, example_url in enumerate(example_videos, 1):
+                    if st.button(f"📺 Try Example Video {i}", key=f"example_{i}"):
+                        st.session_state.video_url = example_url
+                        st.rerun()
+
                 return
             
             # Step 2: Display video metadata
@@ -399,7 +473,7 @@ class YouTubeChatbotApp:
         max_display = ui_config.get('max_chat_history_display', 50)
         recent_history = chat_history[-max_display:] if len(chat_history) > max_display else chat_history
         
-        for i, entry in enumerate(reversed(recent_history)):
+        for entry in reversed(recent_history):
             with st.expander(f"Q: {entry['question'][:50]}..." if len(entry['question']) > 50 else f"Q: {entry['question']}"):
                 st.markdown(f"**Question:** {entry['question']}")
                 st.markdown(f"**Answer:** {entry['answer']}")
