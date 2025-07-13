@@ -6,6 +6,12 @@ A sophisticated Streamlit application that transforms YouTube videos into intera
 ![Streamlit](https://img.shields.io/badge/streamlit-v1.28+-red.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
+## 🚀 Live Demo
+
+**Try the app now:** [https://ai-powered-youtube-transcript-tutor.streamlit.app/](https://ai-powered-youtube-transcript-tutor.streamlit.app/)
+
+Experience the full functionality without any setup required!
+
 ## 🌟 Features
 
 ### Core Functionality
@@ -30,6 +36,8 @@ A sophisticated Streamlit application that transforms YouTube videos into intera
 - **Session Management**: Advanced session state management
 
 ## 🚀 Quick Start
+
+> **💡 Want to try it first?** Check out the [live demo](https://ai-powered-youtube-transcript-tutor.streamlit.app/) - no installation required!
 
 ### Prerequisites
 - Python 3.8 or higher
